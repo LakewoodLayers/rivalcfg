@@ -32,6 +32,7 @@ dev = [
 
 [project.scripts]
 rivalcfg = "rivalcfg.__main__:main"
+rivalcfg-qtgui = "rivalcfg.qtgui:main"
 
 [project.urls]
 homepage = "https://rivalcfg.flozz.org/"
