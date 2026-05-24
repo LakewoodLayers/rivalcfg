@@ -6,173 +6,50 @@ import sys
 from contextlib import redirect_stderr, redirect_stdout
 
 from . import __main__ as rival_main
-from . import devices
-from . import get_first_mouse
 
 
 try:
-    from PyQt5 import QtCore, QtWidgets
+    from PyQt5 import QtWidgets
 except ImportError:  # pragma: no cover
     QtWidgets = None
-    QtCore = None
 
 
 class RivalcfgGui(QtWidgets.QWidget):
-    """Qt frontend with basic SteelSeries GG-like controls for common settings."""
+    """Simple Qt wrapper around the existing CLI entrypoint."""
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("rivalcfg (Qt GUI)")
-        self.resize(1000, 680)
+        self.resize(850, 500)
 
-        self.mouse = None
-        self.mouse_profile = None
-        self.sensitivity_cli = None
-        self.polling_cli = None
+        self.args_input = QtWidgets.QLineEdit()
+        self.args_input.setPlaceholderText("Voorbeeld: --list of --help")
 
-        self._init_device()
-        self._build_ui()
+        self.run_button = QtWidgets.QPushButton("Uitvoeren")
+        self.run_button.clicked.connect(self._on_run)
 
-    def _init_device(self):
-        try:
-            self.mouse = get_first_mouse()
-            if self.mouse:
-                self.mouse_profile = devices.get_profile(
-                    vendor_id=self.mouse.vendor_id,
-                    product_id=self.mouse.product_id,
-                )
-        except Exception:
-            self.mouse = None
-            self.mouse_profile = None
+        self.clear_button = QtWidgets.QPushButton("Leeg")
+        self.clear_button.clicked.connect(self._on_clear)
 
-    def _build_ui(self):
         self.output = QtWidgets.QPlainTextEdit()
         self.output.setReadOnly(True)
 
-        self.device_label = QtWidgets.QLabel(
-            self.mouse.name if self.mouse else "No supported mouse detected"
-        )
-
-        quick_group = QtWidgets.QGroupBox("Quick actions")
-        quick_layout = QtWidgets.QGridLayout(quick_group)
-        self._add_action_button(quick_layout, 0, 0, "Help", ["--help"])
-        self._add_action_button(quick_layout, 0, 1, "Version", ["--version"])
-        self._add_action_button(quick_layout, 0, 2, "List devices", ["--list"])
-        self._add_action_button(quick_layout, 1, 0, "Debug info", ["--print-debug"])
-        self._add_action_button(quick_layout, 1, 1, "Print udev", ["--print-udev"])
-
-        controls_group = QtWidgets.QGroupBox("Mouse controls")
-        controls_layout = QtWidgets.QFormLayout(controls_group)
-
-        self.no_save_checkbox = QtWidgets.QCheckBox("Do not save settings (--no-save)")
-        self.reset_checkbox = QtWidgets.QCheckBox("Reset first (--reset)")
-        controls_layout.addRow(self.no_save_checkbox)
-        controls_layout.addRow(self.reset_checkbox)
-
-        self.dpi1_slider = None
-        self.dpi2_slider = None
-        self.dpi1_value = None
-        self.dpi2_value = None
-        self.polling_combo = None
-
-        self._build_setting_controls(controls_layout)
-
-        self.extra_args_input = QtWidgets.QLineEdit()
-        self.extra_args_input.setPlaceholderText("Optional advanced args")
-        controls_layout.addRow("Extra args", self.extra_args_input)
-
-        apply_button = QtWidgets.QPushButton("Apply settings")
-        apply_button.clicked.connect(self._on_apply_settings)
-
-        clear_button = QtWidgets.QPushButton("Clear output")
-        clear_button.clicked.connect(self.output.clear)
+        top_layout = QtWidgets.QHBoxLayout()
+        top_layout.addWidget(QtWidgets.QLabel("CLI argumenten:"))
+        top_layout.addWidget(self.args_input, 1)
+        top_layout.addWidget(self.run_button)
+        top_layout.addWidget(self.clear_button)
 
         root_layout = QtWidgets.QVBoxLayout(self)
-        root_layout.addWidget(QtWidgets.QLabel("Detected device:"))
-        root_layout.addWidget(self.device_label)
-        root_layout.addWidget(quick_group)
-        root_layout.addWidget(controls_group)
-        root_layout.addWidget(apply_button)
-        root_layout.addWidget(clear_button)
+        root_layout.addLayout(top_layout)
         root_layout.addWidget(self.output, 1)
 
-    def _build_setting_controls(self, form_layout):
-        if not self.mouse_profile:
-            return
+    def _on_clear(self):
+        self.output.clear()
 
-        for setting_name, info in self.mouse_profile["settings"].items():
-            if info.get("value_type") == "multidpi_range_choice" and not self.sensitivity_cli:
-                self.sensitivity_cli = info["cli"][1]
-                min_dpi, max_dpi, step = info["input_range"]
-                default_values = [int(v.strip()) for v in str(info["default"]).split(",")[:2]]
-
-                dpi_layout = QtWidgets.QHBoxLayout()
-                self.dpi1_slider, self.dpi1_value = self._make_dpi_slider(
-                    min_dpi, max_dpi, step, default_values[0]
-                )
-                self.dpi2_slider, self.dpi2_value = self._make_dpi_slider(
-                    min_dpi, max_dpi, step, default_values[1]
-                )
-                dpi_layout.addWidget(QtWidgets.QLabel("DPI 1"))
-                dpi_layout.addWidget(self.dpi1_slider)
-                dpi_layout.addWidget(self.dpi1_value)
-                dpi_layout.addWidget(QtWidgets.QLabel("DPI 2"))
-                dpi_layout.addWidget(self.dpi2_slider)
-                dpi_layout.addWidget(self.dpi2_value)
-                dpi_widget = QtWidgets.QWidget()
-                dpi_widget.setLayout(dpi_layout)
-                form_layout.addRow("Sensitivity", dpi_widget)
-
-            if setting_name == "polling_rate" and info.get("value_type") == "choice":
-                self.polling_cli = info["cli"][1]
-                self.polling_combo = QtWidgets.QComboBox()
-                for choice in sorted(info["choices"].keys()):
-                    self.polling_combo.addItem(str(choice), str(choice))
-                form_layout.addRow("Polling rate (Hz)", self.polling_combo)
-
-    def _make_dpi_slider(self, minimum, maximum, step, default_value):
-        slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        slider.setMinimum(minimum)
-        slider.setMaximum(maximum)
-        slider.setSingleStep(step)
-        slider.setPageStep(step)
-        slider.setTickInterval(step * 2)
-        slider.setValue(default_value)
-
-        label = QtWidgets.QLabel(str(default_value))
-        slider.valueChanged.connect(lambda value: label.setText(str(value)))
-        return slider, label
-
-    def _add_action_button(self, layout, row, col, label, args):
-        button = QtWidgets.QPushButton(label)
-        button.clicked.connect(lambda _checked=False, command_args=args: self._run(command_args))
-        layout.addWidget(button, row, col)
-
-    def _on_apply_settings(self):
-        args = []
-        if self.no_save_checkbox.isChecked():
-            args.append("--no-save")
-        if self.reset_checkbox.isChecked():
-            args.append("--reset")
-
-        if self.dpi1_slider and self.dpi2_slider and self.sensitivity_cli:
-            args.extend(
-                [
-                    self.sensitivity_cli,
-                    f"{self.dpi1_slider.value()},{self.dpi2_slider.value()}",
-                ]
-            )
-
-        if self.polling_combo and self.polling_cli:
-            args.extend([self.polling_cli, self.polling_combo.currentData()])
-
-        extra_args = self.extra_args_input.text().strip()
-        if extra_args:
-            args.extend(shlex.split(extra_args))
-
-        self._run(args)
-
-    def _run(self, args):
+    def _on_run(self):
+        raw_args = self.args_input.text().strip()
+        args = shlex.split(raw_args)
         stdout_buf = io.StringIO()
         stderr_buf = io.StringIO()
         exit_code = 0
@@ -186,12 +63,15 @@ class RivalcfgGui(QtWidgets.QWidget):
             stderr_buf.write(f"E: Unexpected error: {exc}\n")
             exit_code = 1
 
-        self.output.appendPlainText(f"$ rivalcfg {' '.join(args)}")
-        if stdout_buf.getvalue().strip():
-            self.output.appendPlainText(stdout_buf.getvalue().strip())
-        if stderr_buf.getvalue().strip():
-            self.output.appendPlainText(stderr_buf.getvalue().strip())
-        self.output.appendPlainText(f"[Exit code: {exit_code}]\n")
+        stdout_text = stdout_buf.getvalue().strip()
+        stderr_text = stderr_buf.getvalue().strip()
+
+        if stdout_text:
+            self.output.appendPlainText(stdout_text)
+        if stderr_text:
+            self.output.appendPlainText(stderr_text)
+
+        self.output.appendPlainText(f"\n[Exit code: {exit_code}]\n")
 
 
 def main():
