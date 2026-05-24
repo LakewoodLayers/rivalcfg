@@ -7,6 +7,7 @@ from . import cli
 from . import udev
 from . import devices
 from . import get_first_mouse
+from . import qtgui
 
 _EPILOG = """
 Please report any bug on Github: https://github.com/flozz/rivalcfg/issues
@@ -56,6 +57,9 @@ def _render_battery_level(level=None, is_charging=None):
 
 
 def main(args=sys.argv[1:]):
+    if "--qt-gui" in args:
+        sys.exit(qtgui.main())
+
     # Display a message when no argument given
     if not args:
         print("USAGE:\n  rivalcfg --help")
